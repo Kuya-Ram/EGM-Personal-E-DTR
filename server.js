@@ -107,7 +107,9 @@ async function startServer() {
             console.log(`DTR Server running at http://localhost:${PORT}`);
         });
     } catch (error) {
-        console.error("Unable to connect to MySQL:", error.message);
+        console.error("MYSQL ERROR DETAILS:", error);
+        console.error("MYSQL ERROR CODE:", error.code);
+        console.error("MYSQL ERROR MESSAGE:", error.message);
         process.exit(1);
     }
 }
