@@ -9,7 +9,7 @@ import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import db, { dbConfig } from "./config/database.js";
+import db, { dbConfig, closeDatabase } from "./config/database.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
@@ -19,19 +19,31 @@ import attendanceRoutes from "./routes/attendanceRoutes.js";
 // ========================================
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+const PORT = Number(process.env.PORT || 3000);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ========================================
-// VALIDATE SESSION SECRET
+// VALIDATE ENVIRONMENT
 // ========================================
 
-if (!process.env.SESSION_SECRET) {
+if (
+    !process.env.SESSION_SECRET ||
+    process.env.SESSION_SECRET.trim() === ""
+) {
     throw new Error(
         "Missing SESSION_SECRET environment variable"
     );
+}
+
+if (
+    !Number.isInteger(PORT) ||
+    PORT < 1 ||
+    PORT > 65535
+) {
+    throw new Error("Invalid server PORT configuration");
 }
 
 // ========================================
@@ -65,7 +77,13 @@ app.use(
 // ========================================
 
 app.use(express.json({ limit: "20kb" }));
-app.use(express.urlencoded({ extended: false }));
+
+app.use(
+    express.urlencoded({
+        extended: false,
+        limit: "20kb"
+    })
+);
 
 // ========================================
 // AUTHENTICATION RATE LIMITER
@@ -89,32 +107,46 @@ app.use("/api/auth", authLimiter);
 // FRONTEND FILES
 // ========================================
 
-app.use(express.static(path.join(__dirname, "public")));
+app.use(
+    express.static(path.join(__dirname, "public"))
+);
 
 // ========================================
 // HEALTH CHECK
 // ========================================
 
 app.get("/api/health", (req, res) => {
-    res.json({
+    res.status(200).json({
         success: true,
-        message: "Personal DTR backend is running."
+        message: "E-DTR backend is running.",
+        status: "online"
     });
 });
+
+// ========================================
+// MYSQL SESSION STORE
+// ========================================
+
+const MySQLStore = MySQLStoreFactory(session);
 
 // ========================================
 // START SERVER
 // ========================================
 
-async function startServer() {
-    let sessionStore;
+let sessionStore;
+let server;
+let isShuttingDown = false;
 
+async function startServer() {
     try {
         console.log("--------------------------------");
         console.log("STARTING E-DTR SERVER");
         console.log("--------------------------------");
 
-        // Test main MySQL connection
+        // ========================================
+        // TEST MAIN MYSQL CONNECTION
+        // ========================================
+
         console.log("Checking MySQL connection...");
 
         await db.query("SELECT 1");
@@ -123,10 +155,11 @@ async function startServer() {
             "MYSQL DATABASE CONNECTION SUCCESSFUL"
         );
 
-        // Initialize MySQL session storage
-        console.log("Initializing MySQL session store...");
+        // ========================================
+        // INITIALIZE MYSQL SESSION STORE
+        // ========================================
 
-        const MySQLStore = MySQLStoreFactory(session);
+        console.log("Initializing MySQL session store...");
 
         sessionStore = new MySQLStore({
             host: dbConfig.host,
@@ -135,19 +168,46 @@ async function startServer() {
             password: dbConfig.password,
             database: dbConfig.database,
 
+            waitForConnections: true,
+            connectionLimit: 1,
+            queueLimit: 0,
+
             createDatabaseTable: true,
 
             clearExpired: true,
             checkExpirationInterval: 900000,
-            expiration: 86400000
+            expiration: 86400000,
+
+            endConnectionOnClose: true
         });
 
-        // Session middleware
+        // Wait until the session table and store
+        // are ready before accepting requests.
+
+        if (typeof sessionStore.onReady !== "function") {
+            throw new Error(
+                "Unsupported express-mysql-session version. Version 3.x is required."
+            );
+        }
+
+        await sessionStore.onReady();
+
+        console.log(
+            "MYSQL SESSION STORE INITIALIZED SUCCESSFULLY"
+        );
+
+        // ========================================
+        // SESSION MIDDLEWARE
+        // ========================================
+
         app.use(
             session({
                 name: "dtr.sid",
+
                 secret: process.env.SESSION_SECRET,
+
                 store: sessionStore,
+
                 resave: false,
                 saveUninitialized: false,
 
@@ -165,34 +225,103 @@ async function startServer() {
         // ========================================
 
         app.use("/api/auth", authRoutes);
+
         app.use("/api/attendance", attendanceRoutes);
 
         // ========================================
         // START EXPRESS SERVER
         // ========================================
 
-        app.listen(PORT, "0.0.0.0", () => {
+        server = app.listen(PORT, "0.0.0.0", () => {
             console.log("--------------------------------");
             console.log("E-DTR SERVER STARTED");
+            console.log("--------------------------------");
+
             console.log(`Server running on port ${PORT}`);
             console.log("MySQL: Connected");
-            console.log("Session Store: Initialized");
+            console.log("Session Store: Ready");
+            console.log("Authentication API: Ready");
+            console.log("Attendance API: Ready");
+
             console.log("--------------------------------");
+        });
+
+        server.on("error", (error) => {
+            console.error("EXPRESS SERVER ERROR:", {
+                code: error.code,
+                message: error.message
+            });
+
+            process.exitCode = 1;
         });
 
     } catch (error) {
         console.error("--------------------------------");
         console.error("E-DTR SERVER STARTUP FAILED");
-        console.error("Error Code:", error.code || "UNKNOWN");
-        console.error("Error Message:", error.message);
         console.error("--------------------------------");
 
-        if (sessionStore) {
-            sessionStore.close();
-        }
+        console.error({
+            code: error.code || "UNKNOWN",
+            message: error.message
+        });
 
-        process.exit(1);
+        console.error("--------------------------------");
+
+        await shutdown(1);
     }
 }
+
+// ========================================
+// GRACEFUL SHUTDOWN
+// ========================================
+
+async function shutdown(exitCode = 0) {
+    if (isShuttingDown) return;
+
+    isShuttingDown = true;
+
+    console.log("Shutting down E-DTR server...");
+
+    try {
+        if (server) {
+            await new Promise((resolve) => {
+                server.close(() => resolve());
+            });
+        }
+
+        if (sessionStore) {
+            await new Promise((resolve, reject) => {
+                sessionStore.close((error) => {
+                    if (error) reject(error);
+                    else resolve();
+                });
+            });
+
+            console.log("SESSION STORE CLOSED");
+        }
+
+        await closeDatabase();
+
+        console.log("E-DTR SERVER SHUTDOWN COMPLETE");
+
+    } catch (error) {
+        console.error("SHUTDOWN ERROR:", error.message);
+        exitCode = 1;
+    }
+
+    process.exitCode = exitCode;
+}
+
+process.once("SIGTERM", () => {
+    shutdown(0);
+});
+
+process.once("SIGINT", () => {
+    shutdown(0);
+});
+
+// ========================================
+// RUN APPLICATION
+// ========================================
 
 startServer();

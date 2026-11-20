@@ -3,18 +3,42 @@ import "dotenv/config";
 import mysql from "mysql2/promise";
 
 // ========================================
-// DATABASE CONFIGURATION
+// ENVIRONMENT VARIABLE HELPER
 // ========================================
 
-const getEnv = (primary, fallback) => {
-    const primaryValue = process.env[primary];
+function getEnv(primary, fallback, { trim = true } = {}) {
+    for (const key of [primary, fallback]) {
+        const value = process.env[key];
 
-    if (primaryValue !== undefined && primaryValue !== "") {
-        return primaryValue;
+        if (value !== undefined && value !== "") {
+            const normalized = trim ? value.trim() : value;
+
+            if (normalized !== "") {
+                return normalized;
+            }
+        }
     }
 
-    return process.env[fallback];
-};
+    return undefined;
+}
+
+function getEnvSource(primary, fallback, { trim = true } = {}) {
+    for (const key of [primary, fallback]) {
+        const value = process.env[key];
+
+        if (value !== undefined && value !== "") {
+            if (!trim || value.trim() !== "") {
+                return key;
+            }
+        }
+    }
+
+    return "MISSING";
+}
+
+// ========================================
+// DATABASE CONFIGURATION
+// ========================================
 
 export const dbConfig = {
     host: getEnv("DB_HOST", "MYSQLHOST"),
@@ -25,7 +49,12 @@ export const dbConfig = {
 
     user: getEnv("DB_USER", "MYSQLUSER"),
 
-    password: getEnv("DB_PASSWORD", "MYSQLPASSWORD"),
+    // Preserve the exact password value.
+    password: getEnv(
+        "DB_PASSWORD",
+        "MYSQLPASSWORD",
+        { trim: false }
+    ),
 
     database: getEnv("DB_NAME", "MYSQLDATABASE")
 };
@@ -34,44 +63,40 @@ export const dbConfig = {
 // DATABASE CONFIG DIAGNOSTIC
 // ========================================
 
-console.log("DATABASE CONFIG DIAGNOSTIC:", {
-    HOST_SOURCE: process.env.DB_HOST
-        ? "DB_HOST"
-        : process.env.MYSQLHOST
-            ? "MYSQLHOST"
-            : "MISSING",
+console.log("--------------------------------");
+console.log("DATABASE CONFIG DIAGNOSTIC");
+console.log("--------------------------------");
 
-    PORT_SOURCE: process.env.DB_PORT
-        ? "DB_PORT"
-        : process.env.MYSQLPORT
-            ? "MYSQLPORT"
-            : "DEFAULT_3306",
+console.log({
+    HOST_SOURCE: getEnvSource("DB_HOST", "MYSQLHOST"),
 
-    USER_SOURCE: process.env.DB_USER
-        ? "DB_USER"
-        : process.env.MYSQLUSER
-            ? "MYSQLUSER"
-            : "MISSING",
+    PORT_SOURCE: getEnvSource("DB_PORT", "MYSQLPORT"),
 
-    PASSWORD_SOURCE: process.env.DB_PASSWORD
-        ? "DB_PASSWORD"
-        : process.env.MYSQLPASSWORD
-            ? "MYSQLPASSWORD"
-            : "MISSING",
+    USER_SOURCE: getEnvSource("DB_USER", "MYSQLUSER"),
 
-    DATABASE_SOURCE: process.env.DB_NAME
-        ? "DB_NAME"
-        : process.env.MYSQLDATABASE
-            ? "MYSQLDATABASE"
-            : "MISSING",
+    PASSWORD_SOURCE: getEnvSource(
+        "DB_PASSWORD",
+        "MYSQLPASSWORD",
+        { trim: false }
+    ),
+
+    DATABASE_SOURCE: getEnvSource(
+        "DB_NAME",
+        "MYSQLDATABASE"
+    ),
+
+    PASSWORD_EXISTS: Boolean(dbConfig.password),
 
     PASSWORD_LENGTH: dbConfig.password?.length ?? 0,
 
     PASSWORD_HAS_OUTER_SPACES:
-        dbConfig.password !== dbConfig.password?.trim(),
+        dbConfig.password !== undefined &&
+        dbConfig.password !== dbConfig.password.trim(),
 
-    NODE_ENV: process.env.NODE_ENV
+    NODE_ENV: process.env.NODE_ENV || "undefined"
 });
+
+console.log("--------------------------------");
 
 // ========================================
 // VALIDATE DATABASE CONFIGURATION
@@ -80,18 +105,17 @@ console.log("DATABASE CONFIG DIAGNOSTIC:", {
 const requiredVariables = [
     "host",
     "user",
-    "database",
-    "password"
+    "password",
+    "database"
 ];
 
 for (const key of requiredVariables) {
     if (
-        dbConfig[key] === undefined ||
-        dbConfig[key] === null ||
-        dbConfig[key] === ""
+        typeof dbConfig[key] !== "string" ||
+        dbConfig[key].trim() === ""
     ) {
         throw new Error(
-            `Missing database configuration: ${key}`
+            `Missing or invalid database configuration: ${key}`
         );
     }
 }
@@ -101,7 +125,9 @@ if (
     dbConfig.port < 1 ||
     dbConfig.port > 65535
 ) {
-    throw new Error("Invalid database configuration: port");
+    throw new Error(
+        "Invalid database configuration: port"
+    );
 }
 
 // ========================================
@@ -127,17 +153,27 @@ export async function testConnection() {
     let connection;
 
     try {
+        console.log("Checking MySQL connection...");
+
         connection = await db.getConnection();
 
         await connection.ping();
 
+        console.log("--------------------------------");
         console.log("MYSQL CONNECTION SUCCESSFUL");
+        console.log("--------------------------------");
 
         return true;
 
     } catch (error) {
-        console.error("MYSQL CONNECTION FAILED:", {
+        console.error("--------------------------------");
+        console.error("MYSQL CONNECTION FAILED");
+        console.error("--------------------------------");
+
+        console.error({
             code: error.code,
+            errno: error.errno,
+            sqlState: error.sqlState,
             message: error.message
         });
 
@@ -147,6 +183,26 @@ export async function testConnection() {
         if (connection) {
             connection.release();
         }
+    }
+}
+
+// ========================================
+// CLOSE DATABASE POOL
+// ========================================
+
+export async function closeDatabase() {
+    try {
+        await db.end();
+
+        console.log("MYSQL CONNECTION POOL CLOSED");
+
+    } catch (error) {
+        console.error(
+            "MYSQL POOL SHUTDOWN FAILED:",
+            error.message
+        );
+
+        throw error;
     }
 }
 
