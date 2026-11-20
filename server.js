@@ -13,6 +13,7 @@ import db, { dbConfig } from "./config/database.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
+import dns from "node:dns/promises";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -131,5 +132,25 @@ console.log("DATABASE CONFIG CHECK:", {
     MYSQLPORT_EXISTS: Boolean(process.env.MYSQLPORT),
     NODE_ENV: process.env.NODE_ENV
 });
+
+async function testMySQLDNS() {
+    try {
+        const result = await dns.lookup(process.env.DB_HOST);
+
+        console.log("MYSQL DNS LOOKUP SUCCESS:", {
+            hostname: process.env.DB_HOST,
+            address: result.address,
+            family: result.family
+        });
+    } catch (error) {
+        console.error("MYSQL DNS LOOKUP FAILED:", {
+            hostname: process.env.DB_HOST,
+            code: error.code,
+            message: error.message
+        });
+    }
+}
+
+await testMySQLDNS();
 
 startServer();
