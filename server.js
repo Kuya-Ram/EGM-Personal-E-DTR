@@ -124,4 +124,12 @@ async function startServer() {
     }
 }
 
+console.log("DATABASE CONFIG CHECK:", {
+    DB_HOST_EXISTS: Boolean(process.env.DB_HOST),
+    MYSQLHOST_EXISTS: Boolean(process.env.MYSQLHOST),
+    DB_PORT_EXISTS: Boolean(process.env.DB_PORT),
+    MYSQLPORT_EXISTS: Boolean(process.env.MYSQLPORT),
+    NODE_ENV: process.env.NODE_ENV
+});
+
 startServer();
