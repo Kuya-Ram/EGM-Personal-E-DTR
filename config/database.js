@@ -6,24 +6,28 @@ import mysql from "mysql2/promise";
 // DATABASE CONFIGURATION
 // ========================================
 
+const getEnv = (primary, fallback) => {
+    const primaryValue = process.env[primary];
+
+    if (primaryValue !== undefined && primaryValue !== "") {
+        return primaryValue;
+    }
+
+    return process.env[fallback];
+};
+
 export const dbConfig = {
-    host: process.env.DB_HOST || process.env.MYSQLHOST,
+    host: getEnv("DB_HOST", "MYSQLHOST"),
 
     port: Number(
-        process.env.DB_PORT ||
-        process.env.MYSQLPORT ||
-        3306
+        getEnv("DB_PORT", "MYSQLPORT") || 3306
     ),
 
-    user: process.env.DB_USER || process.env.MYSQLUSER,
+    user: getEnv("DB_USER", "MYSQLUSER"),
 
-    password:
-        process.env.DB_PASSWORD ||
-        process.env.MYSQLPASSWORD,
+    password: getEnv("DB_PASSWORD", "MYSQLPASSWORD"),
 
-    database:
-        process.env.DB_NAME ||
-        process.env.MYSQLDATABASE
+    database: getEnv("DB_NAME", "MYSQLDATABASE")
 };
 
 // ========================================
@@ -61,6 +65,11 @@ console.log("DATABASE CONFIG DIAGNOSTIC:", {
             ? "MYSQLDATABASE"
             : "MISSING",
 
+    PASSWORD_LENGTH: dbConfig.password?.length ?? 0,
+
+    PASSWORD_HAS_OUTER_SPACES:
+        dbConfig.password !== dbConfig.password?.trim(),
+
     NODE_ENV: process.env.NODE_ENV
 });
 
@@ -71,25 +80,28 @@ console.log("DATABASE CONFIG DIAGNOSTIC:", {
 const requiredVariables = [
     "host",
     "user",
-    "database"
+    "database",
+    "password"
 ];
 
 for (const key of requiredVariables) {
-    if (!dbConfig[key]) {
+    if (
+        dbConfig[key] === undefined ||
+        dbConfig[key] === null ||
+        dbConfig[key] === ""
+    ) {
         throw new Error(
             `Missing database configuration: ${key}`
         );
     }
 }
 
-if (!Number.isInteger(dbConfig.port) ||
+if (
+    !Number.isInteger(dbConfig.port) ||
     dbConfig.port < 1 ||
-    dbConfig.port > 65535) {
+    dbConfig.port > 65535
+) {
     throw new Error("Invalid database configuration: port");
-}
-
-if (!dbConfig.password) {
-    throw new Error("Missing database configuration: password");
 }
 
 // ========================================
@@ -137,5 +149,9 @@ export async function testConnection() {
         }
     }
 }
+
+// ========================================
+// EXPORT DATABASE
+// ========================================
 
 export default db;
