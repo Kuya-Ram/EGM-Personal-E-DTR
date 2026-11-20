@@ -1,18 +1,18 @@
 
+import "dotenv/config";
+
 import express from "express";
 import session from "express-session";
 import MySQLStoreFactory from "express-mysql-session";
-import dotenv from "dotenv";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import db from "./config/database.js";
+import db, { dbConfig } from "./config/database.js";
+
 import authRoutes from "./routes/authRoutes.js";
 import attendanceRoutes from "./routes/attendanceRoutes.js";
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,14 +20,17 @@ const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Needed when deployed behind a trusted proxy
+// Validate session secret
+if (!process.env.SESSION_SECRET) {
+    throw new Error("Missing SESSION_SECRET environment variable");
+}
+
+// Railway proxy configuration
 if (process.env.NODE_ENV === "production") {
     app.set("trust proxy", 1);
 }
 
-// Security headers.
-// unsafe-inline is temporarily allowed for the existing auth.js
-// because it currently injects its CSS through a style element.
+// Security headers
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
@@ -47,14 +50,15 @@ app.use(express.urlencoded({ extended: false }));
 const MySQLStore = MySQLStoreFactory(session);
 
 const sessionStore = new MySQLStore({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
+    host: dbConfig.host,
+    port: dbConfig.port,
+    user: dbConfig.user,
+    password: dbConfig.password,
+    database: dbConfig.database,
     createDatabaseTable: true
 });
 
+// Session configuration
 app.use(session({
     name: "dtr.sid",
     secret: process.env.SESSION_SECRET,
@@ -69,7 +73,7 @@ app.use(session({
     }
 }));
 
-// Limit repeated login and registration attempts
+// Authentication rate limiter
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 20,
@@ -101,18 +105,21 @@ app.get("/api/health", (req, res) => {
 // Start server
 async function startServer() {
     try {
-        console.log("DATABASE HOST:", process.env.DB_HOST);
-        console.log("DATABASE PORT:", process.env.DB_PORT);
-        
+        console.log("Checking MySQL connection...");
+
         await db.query("SELECT 1");
 
-        app.listen(PORT, () => {
-            console.log(`DTR Server running at http://localhost:${PORT}`);
+        console.log("MySQL database connected successfully.");
+
+        app.listen(PORT, "0.0.0.0", () => {
+            console.log(`DTR Server running on port ${PORT}`);
         });
+
     } catch (error) {
-        console.error("MYSQL ERROR DETAILS:", error);
-        console.error("MYSQL ERROR CODE:", error.code);
-        console.error("MYSQL ERROR MESSAGE:", error.message);
+        console.error("MYSQL CONNECTION FAILED");
+        console.error("Error Code:", error.code);
+        console.error("Error Message:", error.message);
+
         process.exit(1);
     }
 }
