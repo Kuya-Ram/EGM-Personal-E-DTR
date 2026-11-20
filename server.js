@@ -101,6 +101,9 @@ app.get("/api/health", (req, res) => {
 // Start server
 async function startServer() {
     try {
+        console.log("DATABASE HOST:", process.env.DB_HOST);
+        console.log("DATABASE PORT:", process.env.DB_PORT);
+        
         await db.query("SELECT 1");
 
         app.listen(PORT, () => {
