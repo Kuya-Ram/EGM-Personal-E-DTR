@@ -2,21 +2,36 @@
 import db from "./config/database.js";
 
 async function testConnection() {
+    let connection;
+
     try {
-        const connection = await db.getConnection();
+        console.log("Testing Railway MySQL Connection...");
 
-        console.log("MySQL Database Connected Successfully!");
+        connection = await db.getConnection();
 
-        const [rows] = await connection.query(
-            "SELECT DATABASE() AS database_name"
-        );
+        const [rows] = await connection.query(`
+            SELECT
+                DATABASE() AS database_name,
+                USER() AS connected_user,
+                VERSION() AS mysql_version
+        `);
 
-        console.log("Connected Database:", rows[0].database_name);
+        console.log("MYSQL CONNECTION SUCCESSFUL");
+        console.log("Database:", rows[0].database_name);
+        console.log("Connected User:", rows[0].connected_user);
+        console.log("MySQL Version:", rows[0].mysql_version);
 
-        connection.release();
     } catch (error) {
-        console.error("Database Connection Failed:", error.message);
+        console.error("MYSQL CONNECTION FAILED:", {
+            code: error.code,
+            message: error.message
+        });
+
     } finally {
+        if (connection) {
+            connection.release();
+        }
+
         await db.end();
     }
 }
