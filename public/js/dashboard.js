@@ -230,8 +230,8 @@ export function renderDashboard(container, user, onLogout) {
                 bottom: 0;
                 left: 0;
                 width: 100%;
-                z-index: 99999;
-
+                z-index: 5;
+                text-align: center;
                 flex-shrink: 0;
                 box-sizing: border-box;
                 background: #071b1d;
@@ -320,12 +320,6 @@ export function renderDashboard(container, user, onLogout) {
                 color: #00e5ef;
                 background: rgba(0, 229, 239, .10);
                 border-color: rgba(0, 229, 239, .25);
-            }
-
-            .dashboard-main {
-                flex: 1;
-                min-width: 0;
-                padding: 30px;
             }
 
             .dashboard-topbar {
@@ -1176,7 +1170,7 @@ export function renderDashboard(container, user, onLogout) {
                     inset 0 1px 8px rgba(0, 255, 255, 0.04);
 
                 text-align: center;
-                position: relative;
+                position: fixed;
                 z-index: 5;
             }
 
